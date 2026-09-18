@@ -201,3 +201,71 @@ async def test_cannot_delete_other_users_todo(client: AsyncClient):
         headers={"Authorization": f"Bearer {token_a}"},
     )
     assert verify_resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_cache_isolated_between_users(client: AsyncClient):
+    """Cache của user A không được trả về cho user B."""
+    token_a = await get_auth_token(client, "cache-a@example.com")
+    token_b = await get_auth_token(client, "cache-b@example.com")
+
+    # User A tạo 1 todo
+    await client.post(
+        "/api/v1/todos",
+        json={"title": "A's todo"},
+        headers={"Authorization": f"Bearer {token_a}"},
+    )
+
+    # User A gọi GET /todos để populate cache của A
+    resp_a = await client.get(
+        "/api/v1/todos",
+        headers={"Authorization": f"Bearer {token_a}"},
+    )
+    assert resp_a.status_code == 200
+    assert resp_a.json()["total"] == 1
+
+    # User B gọi GET /todos — không được thấy todo của A
+    resp_b = await client.get(
+        "/api/v1/todos",
+        headers={"Authorization": f"Bearer {token_b}"},
+    )
+    assert resp_b.status_code == 200
+    data_b = resp_b.json()
+    assert data_b["total"] == 0
+    assert len(data_b["items"]) == 0
+
+
+@pytest.mark.asyncio
+async def test_cache_invalidated_after_create(client: AsyncClient):
+    """Cache phải bị invalidate sau khi tạo todo mới."""
+    token = await get_auth_token(client, "cache-inv@example.com")
+
+    # Tạo todo đầu tiên
+    await client.post(
+        "/api/v1/todos",
+        json={"title": "First Todo"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    # GET lần 1 — populate cache, assert total == 1
+    resp1 = await client.get(
+        "/api/v1/todos",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp1.status_code == 200
+    assert resp1.json()["total"] == 1
+
+    # Tạo todo thứ hai (phải invalidate cache)
+    await client.post(
+        "/api/v1/todos",
+        json={"title": "Second Todo"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    # GET lần 2 — vẫn trong TTL, nhưng cache đã bị invalidate → phải thấy total == 2
+    resp2 = await client.get(
+        "/api/v1/todos",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp2.status_code == 200
+    assert resp2.json()["total"] == 2
