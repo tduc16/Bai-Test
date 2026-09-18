@@ -6,7 +6,7 @@ from datetime import timedelta
 import pytest
 from httpx import AsyncClient
 
-from app.core.security import create_access_token
+from app.core.security import create_access_token, create_refresh_token
 
 
 @pytest.mark.asyncio
@@ -113,3 +113,16 @@ async def test_valid_access_token_accepted(client: AsyncClient):
         headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_refresh_token_rejected_as_access_token(client: AsyncClient):
+    """Bug 7 fix: refresh token không được chấp nhận cho các API cần xác thực."""
+    refresh_token = create_refresh_token(data={"sub": str(uuid.uuid4())})
+
+    response = await client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {refresh_token}"},
+    )
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Invalid token type"
